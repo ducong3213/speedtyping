@@ -1,0 +1,307 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Speed Typing</title>
+<style>
+  body { font-family: 'Roboto Mono', monospace, Consolas; background: #1e1e2e; color: #eee; margin: 0; padding: 40px 20px; text-align: center; user-select: none; }
+  #container { max-width: 950px; margin: 0 auto; }
+  #modeBar { display: inline-flex; align-items: center; gap: 16px; background: #252538; padding: 6px 16px; border-radius: 8px; margin-bottom: 30px; font-size: 13px; }
+  .btn-group { display: inline-flex; gap: 4px; }
+  .btn-group button { background: transparent; color: #777; border: none; font: inherit; font-size: 13px; padding: 3px 8px; cursor: pointer; border-radius: 4px; transition: color 0.15s; }
+  .btn-group button:hover { color: #eee; }
+  .btn-group button.active { color: #ffd166; font-weight: bold; }
+  .divider { color: #444; }
+  #liveStats { display: flex; align-items: baseline; gap: 28px; margin: 0 0 10px 4px; font-size: 32px; font-weight: bold; color: #ffd166; text-align: left; }
+  .unit { font-size: 14px; font-weight: normal; color: #646669; margin-left: 4px; }
+  #wordsBox { max-width: 950px; height: 140px; overflow: hidden; text-align: left; font-size: 26px; line-height: 1.8; scroll-behavior: smooth; }
+  .word { display: inline-block; margin-right: 14px; }
+  .ok { color: #eee; }
+  .bad { color: #ff5c5c; }
+  .extra { color: #8f2d2d; }
+  .todo { color: #585b70; }
+  .caret { display: inline-block; width: 2px; height: 1.2em; background: #ffd166; vertical-align: text-bottom; margin: 0 -1px; animation: blink 1s infinite; }
+  @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+  #typingInput { position: absolute; opacity: 0; pointer-events: none; left: -9999px; }
+  #bottomActions { display: flex; justify-content: center; gap: 24px; margin: 30px auto; }
+  .icon-btn { background: transparent; color: #777a8c; border: none; cursor: pointer; padding: 6px; }
+  .icon-btn:hover { color: #ffd166; }
+  #msg { font-size: 14px; color: #777a8c; margin: 15px 0; min-height: 20px; }
+</style>
+</head>
+<body onclick="inputEl.focus()">
+<div id="container">
+  <!-- Thanh cấu hình: Thời gian (30s/60s) & Chế độ (normal/adaptive) -->
+  <div id="modeBar">
+    <div class="btn-group" id="timeGroup">
+      <button type="button" class="active" data-time="30">30</button>
+      <button type="button" data-time="60">60</button>
+    </div>
+    <span class="divider">|</span>
+    <div class="btn-group" id="modeGroup">
+      <button type="button" class="active" data-mode="normal">normal</button>
+      <button type="button" data-mode="adaptive">adaptive</button>
+    </div>
+  </div>
+
+  <!-- Chỉ số trực tiếp: WPM bên trái, Thời gian bên phải -->
+  <div id="liveStats">
+    <div><span id="liveWpm">0</span><span class="unit">wpm</span></div>
+    <div id="timer">30</div>
+  </div>
+
+  <!-- Vùng chữ hiển thị -->
+  <div id="wordsBox"></div>
+  <input type="text" id="typingInput" autofocus autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+
+  <!-- Nút Chơi lại và Dashboard -->
+  <div id="bottomActions">
+    <button type="button" id="resetBtn" class="icon-btn" title="Chơi lại (Tab)">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+        <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+      </svg>
+    </button>
+    <a href="/dashboard" class="icon-btn" title="Dashboard">
+      <svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor">
+        <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
+      </svg>
+    </a>
+  </div>
+  <div id="msg"></div>
+</div>
+
+<script>
+// 1. Khởi tạo dữ liệu và trạng thái
+let sentence = {{ sentence | tojson }};
+let TOKEN = {{ token | tojson }};
+let currentMode = {{ initial_mode | default('normal') | tojson }};
+let selectedDuration = 30;
+let adaptiveSessionId = sessionStorage.getItem('adaptive_session_id');
+
+if (currentMode === 'adaptive' && !adaptiveSessionId) {
+  adaptiveSessionId = 'adapt_' + Date.now();
+  sessionStorage.setItem('adaptive_session_id', adaptiveSessionId);
+}
+
+let words = sentence.trim().split(/\s+/);
+let wordIdx = 0, typedWords = [], wordDelays = [];
+let start = null, lastTime = null, timerInterval = null, redirectTimer = null, done = false;
+
+const wordsBox = document.getElementById('wordsBox');
+const inputEl = document.getElementById('typingInput');
+const timerEl = document.getElementById('timer');
+const liveWpmEl = document.getElementById('liveWpm');
+const msg = document.getElementById('msg');
+
+// 2. Hiển thị chữ
+function render() {
+  const cur = inputEl.value;
+  wordsBox.innerHTML = words.map((w, i) => {
+    let s = '';
+    if (i < wordIdx) {
+      const t = typedWords[i] || '';
+      for (let j = 0; j < Math.max(w.length, t.length); j++) {
+        s += j < w.length && j < t.length ? `<span class="${t[j] === w[j] ? 'ok' : 'bad'}">${w[j]}</span>`
+           : j >= w.length ? `<span class="extra">${t[j]}</span>` : `<span class="bad">${w[j]}</span>`;
+      }
+    } else if (i === wordIdx) {
+      for (let j = 0; j < Math.max(w.length, cur.length); j++) {
+        if (j === cur.length) s += '<span class="caret"></span>';
+        s += j < w.length && j < cur.length ? `<span class="${cur[j] === w[j] ? 'ok' : 'bad'}">${w[j]}</span>`
+           : j >= w.length ? `<span class="extra">${cur[j]}</span>` : `<span class="todo">${w[j]}</span>`;
+      }
+      if (cur.length >= w.length) s += '<span class="caret"></span>';
+    } else {
+      s = `<span class="todo">${w}</span>`;
+    }
+    return `<span class="word ${i === wordIdx ? 'active' : ''}">${s}</span>`;
+  }).join('');
+
+  const active = wordsBox.querySelector('.active');
+  const first = wordsBox.firstElementChild;
+  if (active && first) {
+    const lineTop = active.offsetTop - first.offsetTop;
+    const lineH = active.offsetHeight || 47;
+    const targetScroll = lineTop > lineH ? lineTop - lineH : 0;
+    if (Math.abs(wordsBox.scrollTop - targetScroll) > 5) {
+      wordsBox.scrollTop = targetScroll;
+    }
+  }
+}
+
+// 3. Tính toán WPM theo từ gõ đúng
+function calcCorrectChars() {
+  let count = 0;
+  for (let i = 0; i < wordIdx; i++) {
+    if (typedWords[i] === words[i]) count += words[i].length + 1;
+  }
+  if (wordIdx < words.length && inputEl.value === words[wordIdx]) {
+    count += words[wordIdx].length + 1;
+  }
+  return count;
+}
+
+function updateLiveWpm() {
+  if (!start) return (liveWpmEl.textContent = '0');
+  const elapsed = (performance.now() - start) / 1000;
+  if (elapsed < 0.5) return (liveWpmEl.textContent = '0');
+  liveWpmEl.textContent = Math.round((calcCorrectChars() / 5) / (elapsed / 60));
+}
+
+// 4. Chuyển từ & Hoàn thành ván
+function advanceWord() {
+  const now = performance.now();
+  wordDelays[wordIdx] = lastTime ? Math.round(now - lastTime) : 100;
+  lastTime = now;
+  typedWords[wordIdx] = inputEl.value;
+  inputEl.value = '';
+  wordIdx++;
+  updateLiveWpm();
+  if (wordIdx >= words.length) finish(); else render();
+}
+
+function finish() {
+  if (done) return;
+  done = true;
+  clearInterval(timerInterval);
+  timerEl.textContent = '0';
+  inputEl.disabled = true;
+
+  if (inputEl.value.trim() && wordIdx < words.length) {
+    typedWords[wordIdx] = inputEl.value.trim();
+    wordDelays[wordIdx] = lastTime ? Math.round(performance.now() - lastTime) : 100;
+    wordIdx++;
+  }
+
+  const elapsed = Math.min(selectedDuration, (performance.now() - start) / 1000);
+  const correctChars = calcCorrectChars();
+  const wpm = elapsed > 0 ? Math.round((correctChars / 5) / (elapsed / 60)) : 0;
+  const acc = wordIdx > 0 ? Math.round((typedWords.filter((w, i) => w === words[i]).length / wordIdx) * 100) : 100;
+  liveWpmEl.textContent = wpm;
+
+  const keys = [];
+  for (let i = 0; i < wordIdx; i++) {
+    const exp = words[i], typ = typedWords[i] || '';
+    const delay = Math.max(30, Math.round((wordDelays[i] || 400) / exp.length));
+    for (let j = 0; j < exp.length; j++) keys.push({ expected: exp[j], typed: typ[j] || '', delay_ms: delay });
+    if (i < wordIdx - 1) keys.push({ expected: ' ', typed: ' ', delay_ms: 80 });
+  }
+
+  msg.innerHTML = `<span style="color:#ffd166">${wpm} wpm</span> &nbsp;|&nbsp; <span>${acc}% acc</span> &nbsp;—&nbsp; chuyển sang dashboard...`;
+
+  const redirectUrl = `/dashboard?mode=${encodeURIComponent(currentMode)}` +
+    (currentMode === 'adaptive' && adaptiveSessionId ? `&adaptive_session_id=${encodeURIComponent(adaptiveSessionId)}` : '');
+
+  fetch('/api/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: TOKEN, keystrokes: keys })
+  }).finally(() => {
+    redirectTimer = setTimeout(() => { window.location.href = redirectUrl; }, 1200);
+  });
+}
+
+// 5. Bắt đầu ván mới (Reset)
+async function newRound() {
+  if (redirectTimer) clearTimeout(redirectTimer);
+  clearInterval(timerInterval);
+  timerInterval = redirectTimer = start = lastTime = null;
+  done = false;
+
+  let url = `/api/sentence?mode=${encodeURIComponent(currentMode)}`;
+  if (currentMode === 'adaptive' && adaptiveSessionId) {
+    url += `&adaptive_session_id=${encodeURIComponent(adaptiveSessionId)}`;
+  }
+
+  const res = await fetch(url).then(r => r.json());
+  sentence = res.sentence;
+  TOKEN = res.token;
+  words = sentence.trim().split(/\s+/);
+  wordIdx = 0;
+  typedWords = [];
+  wordDelays = [];
+
+  timerEl.textContent = selectedDuration;
+  liveWpmEl.textContent = '0';
+  msg.textContent = '';
+  wordsBox.scrollTop = 0;
+  inputEl.disabled = false;
+  inputEl.value = '';
+  render();
+  inputEl.focus();
+}
+
+// 6. Xử lý sự kiện (Thời gian, Chế độ, Gõ phím, Phím tắt)
+document.querySelectorAll('#timeGroup button').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('#timeGroup button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedDuration = parseInt(btn.dataset.time);
+    newRound();
+  };
+});
+
+document.querySelectorAll('#modeGroup button').forEach(btn => {
+  btn.onclick = () => {
+    const newMode = btn.dataset.mode;
+    if (newMode !== currentMode) {
+      currentMode = newMode;
+      if (newMode === 'adaptive') {
+        adaptiveSessionId = 'adapt_' + Date.now();
+        sessionStorage.setItem('adaptive_session_id', adaptiveSessionId);
+      } else {
+        adaptiveSessionId = null;
+        sessionStorage.removeItem('adaptive_session_id');
+      }
+      syncModeUI();
+      newRound();
+    }
+  };
+});
+
+function syncModeUI() {
+  document.querySelectorAll('#modeGroup button').forEach(b => b.classList.toggle('active', b.dataset.mode === currentMode));
+  document.querySelectorAll('#timeGroup button').forEach(b => b.classList.toggle('active', b.dataset.time == selectedDuration));
+}
+
+inputEl.oninput = () => {
+  if (done) return;
+  if (!start) {
+    start = lastTime = performance.now();
+    timerInterval = setInterval(() => {
+      const remain = Math.max(0, Math.ceil(selectedDuration - (performance.now() - start) / 1000));
+      timerEl.textContent = remain;
+      updateLiveWpm();
+      if (remain <= 0) finish();
+    }, 200);
+  }
+  if (inputEl.value.endsWith(' ')) {
+    inputEl.value = inputEl.value.trim();
+    if (inputEl.value) return advanceWord();
+  }
+  updateLiveWpm();
+  render();
+};
+
+inputEl.onkeydown = e => {
+  if (done) return;
+  if (e.key === ' ' && inputEl.value) {
+    e.preventDefault();
+    advanceWord();
+  } else if (e.key === 'Backspace' && !inputEl.value && wordIdx > 0) {
+    e.preventDefault();
+    wordIdx--;
+    inputEl.value = typedWords[wordIdx] || '';
+    render();
+  }
+};
+
+document.getElementById('resetBtn').onclick = newRound;
+document.onkeydown = e => { if (e.key === 'Tab') { e.preventDefault(); newRound(); } };
+
+syncModeUI();
+render();
+window.onload = () => inputEl.focus();
+</script>
+</body>
+</html>

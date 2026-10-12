@@ -1,0 +1,288 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Dashboard - Analytics</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  body { 
+    font-family: 'Roboto Mono', monospace, Consolas; 
+    background: #1e1e2e; 
+    color: #eee; 
+    padding: 40px 20px; 
+    margin: 0; 
+    text-align: center; 
+  }
+  
+  #dashboardContainer { 
+    max-width: 950px; 
+    margin: 0 auto; 
+    text-align: center; 
+  }
+  
+  h2 { font-size: 26px; color: #f5c2e7; margin-bottom: 25px; font-weight: 500; }
+  h3 { font-size: 17px; color: #8be9fd; margin-top: 35px; margin-bottom: 15px; font-weight: 500; letter-spacing: 0.5px; }
+
+  /* Minimal Monkeytype-style action bar (no boxes, no glow) */
+  .action-bar { 
+    display: flex; 
+    justify-content: center; 
+    align-items: center; 
+    gap: 36px; 
+    margin: 20px auto 35px auto; 
+  }
+
+  .action-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #777a8c;
+    font-size: 15px;
+    font-family: inherit;
+    text-decoration: none;
+    transition: color 0.2s ease;
+    cursor: pointer;
+  }
+  .action-link:hover {
+    color: #ffd166;
+  }
+
+  /* Clean chart area without heavy boxes or glows */
+  .chart-box {
+    background: #252538;
+    padding: 22px;
+    border-radius: 8px;
+    margin: 15px auto;
+    height: 350px;
+    position: relative;
+  }
+  canvas { width: 100% !important; height: 100% !important; }
+
+  /* Clean keyboard heatmap */
+  .heatmap-box {
+    background: #252538;
+    padding: 22px;
+    border-radius: 8px;
+    margin: 15px auto;
+  }
+  .kb-row { margin: 5px 0; text-align: center; }
+  .key { 
+    display: inline-block; 
+    min-width: 40px; 
+    height: 40px; 
+    line-height: 40px; 
+    text-align: center;
+    margin: 2px; 
+    border-radius: 5px; 
+    padding: 0 4px; 
+    font-weight: 500;
+    font-size: 14px;
+    transition: background 0.15s;
+  }
+  .k-ok { background: #2e7d32; color: #fff; } 
+  .k-mid { background: #b8860b; color: #fff; }
+  .k-bad { background: #b71c1c; color: #fff; } 
+  .k-na { background: #181825; color: #585b70; }
+  .space { min-width: 300px; }
+
+  /* Clean minimal table */
+  .table-box {
+    background: #252538;
+    padding: 16px;
+    border-radius: 8px;
+    margin: 15px auto 40px auto;
+    overflow-x: auto;
+  }
+  table { border-collapse: collapse; margin: 10px auto; width: 100%; max-width: 900px; }
+  td, th { border-bottom: 1px solid #313244; padding: 10px 14px; text-align: center; font-size: 14px; }
+  th { color: #ffd166; font-size: 14px; font-weight: 500; }
+  td { color: #cdd6f4; }
+  tr:last-child td { border-bottom: none; }
+</style>
+</head>
+<body>
+
+<div id="dashboardContainer">
+  <h2>analytics</h2>
+
+  <div class="action-bar">
+    <a href="/?mode={{ current_mode | default('normal') }}{% if current_mode == 'adaptive' and adaptive_session_id %}&adaptive_session_id={{ adaptive_session_id }}{% endif %}" class="action-link" id="retryBtn" title="Chơi lại ván mới (Tab)">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+        <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+      </svg>
+      <span>chơi lại (Tab)</span>
+    </a>
+    
+    <a href="/?mode=adaptive" class="action-link" title="Luyện phím yếu">
+      <svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor">
+        <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+      </svg>
+      <span>luyện phím yếu</span>
+    </a>
+  </div>
+
+  <h3>xu hướng wpm & accuracy (20 lượt gần nhất)</h3>
+  <div class="chart-box">
+    <canvas id="wpmChart"></canvas>
+  </div>
+
+  <h3>bản đồ nhiệt bàn phím</h3>
+  <div class="heatmap-box">
+    {% for row in layout %}
+    <div class="kb-row">
+      {% for ch in row %}
+        {% set h = heat.get(ch) %}
+        <span class="key {{ 'space' if ch == ' ' }} {{ h.cls if h else 'k-na' }}"
+              title="{{ ch }}: {{ h.errs if h else 0 }} lỗi, delay {{ h.delay if h else '-' }}ms">{{ 'SPACE' if ch == ' ' else ch | upper }}</span>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <h3>lịch sử lượt chơi</h3>
+  <div class="table-box">
+    <table>
+      <tr>
+        <th>#</th>
+        <th>wpm</th>
+        <th>accuracy</th>
+        <th>ký tự</th>
+        <th>từ lỗi</th>
+        <th>thời điểm</th>
+      </tr>
+      {% for s in sessions %}
+      <tr>
+        <td style="color:#777a8c;">{{ s['id'] }}</td>
+        <td style="color:#8be9fd; font-weight:bold;">{{ s['wpm'] }}</td>
+        <td style="color:#7CFC9A;">{{ s['accuracy'] }}%</td>
+        <td>{{ s['total_chars'] }}</td>
+        <td style="color:#ff5c5c;">{{ s['errors'] }}</td>
+        <td style="color:#777a8c; font-size:13px;">{{ s['created_at_vn'] }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="color:#777a8c;">Chưa có dữ liệu</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+
+<script>
+const wpmData = {{ wpm_history | tojson }};
+const accData = {{ acc_history | tojson }};
+new Chart(document.getElementById('wpmChart'), {
+  type: 'line',
+  data: {
+    labels: wpmData.map((_, i) => i + 1),
+    datasets: [
+      { 
+        label: 'wpm', 
+        data: wpmData, 
+        borderColor: '#8be9fd', 
+        backgroundColor: 'rgba(139, 233, 253, 0.1)',
+        fill: true,
+        borderWidth: 2.5,
+        pointRadius: 4,
+        pointHoverRadius: 7,
+        pointBackgroundColor: '#8be9fd',
+        tension: 0.3,
+        yAxisID: 'y'
+      },
+      { 
+        label: 'accuracy %', 
+        data: accData, 
+        borderColor: '#7CFC9A', 
+        backgroundColor: 'rgba(124, 252, 154, 0.08)',
+        fill: true,
+        borderWidth: 2,
+        pointRadius: 3,
+        pointHoverRadius: 6,
+        pointBackgroundColor: '#7CFC9A',
+        tension: 0.3,
+        yAxisID: 'y1'
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: {
+      mode: 'index',
+      intersect: false,
+    },
+    plugins: {
+      legend: {
+        labels: {
+          color: '#888',
+          font: {
+            size: 13,
+            family: "'Roboto Mono', monospace, Consolas"
+          },
+          padding: 16
+        }
+      },
+      tooltip: {
+        padding: 10,
+        backgroundColor: '#181825',
+        titleColor: '#888',
+        bodyColor: '#eee',
+        titleFont: { size: 13 },
+        bodyFont: { size: 13 }
+      }
+    },
+    scales: {
+      x: {
+        ticks: {
+          color: '#777a8c',
+          font: { size: 12 }
+        },
+        grid: {
+          color: 'rgba(255, 255, 255, 0.04)'
+        }
+      },
+      y: {
+        type: 'linear',
+        display: true,
+        position: 'left',
+        beginAtZero: true,
+        suggestedMax: 100,
+        ticks: {
+          color: '#8be9fd',
+          font: { size: 12 }
+        },
+        grid: {
+          color: 'rgba(255, 255, 255, 0.04)'
+        }
+      },
+      y1: {
+        type: 'linear',
+        display: true,
+        position: 'right',
+        beginAtZero: true,
+        max: 100,
+        ticks: {
+          color: '#7CFC9A',
+          font: { size: 12 }
+        },
+        grid: {
+          drawOnChartArea: false,
+        },
+      },
+    }
+  }
+});
+
+const currentMode = {{ current_mode | default('normal') | tojson }};
+const adaptiveSessionId = {{ adaptive_session_id | default('') | tojson }};
+document.addEventListener('keydown', e => {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    let url = '/?mode=' + currentMode;
+    if (currentMode === 'adaptive' && adaptiveSessionId) {
+      url += '&adaptive_session_id=' + encodeURIComponent(adaptiveSessionId);
+    }
+    window.location.href = url;
+  }
+});
+</script>
+</body>
+</html>
